@@ -1,0 +1,133 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { trpc } from "@/lib/trpc";
+import { Bell, BellOff, Check, CheckCheck } from "lucide-react";
+import { toast } from "sonner";
+import { useLocation } from "wouter";
+
+const TYPE_COLORS: Record<string, string> = {
+  Health_Due: "bg-amber-100 text-amber-800 border-amber-200",
+  Kidding_Due: "bg-purple-100 text-purple-800 border-purple-200",
+  Weight_Check: "bg-red-100 text-red-800 border-red-200",
+  Vaccination_Due: "bg-blue-100 text-blue-800 border-blue-200",
+  General: "bg-gray-100 text-gray-700 border-gray-200",
+};
+
+const TYPE_LABELS: Record<string, string> = {
+  Health_Due: "Health Due",
+  Kidding_Due: "Kidding Due",
+  Weight_Check: "Weight Alert",
+  Vaccination_Due: "Vaccination Due",
+  General: "General",
+};
+
+export default function Notifications() {
+  const [, setLocation] = useLocation();
+  const { data: notifications, isLoading } = trpc.notifications.getAll.useQuery();
+  const utils = trpc.useUtils();
+
+  const markReadMutation = trpc.notifications.markRead.useMutation({
+    onSuccess: () => utils.notifications.getAll.invalidate(),
+    onError: (e) => toast.error(e.message),
+  });
+
+  const markAllReadMutation = trpc.notifications.markAllRead.useMutation({
+    onSuccess: () => {
+      toast.success("All notifications marked as read");
+      utils.notifications.getAll.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const unreadCount = (notifications ?? []).filter((n: { isRead: boolean }) => !n.isRead).length;
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-serif font-semibold">Notifications</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {unreadCount > 0 ? `${unreadCount} unread notification${unreadCount !== 1 ? "s" : ""}` : "All caught up"}
+          </p>
+        </div>
+        {unreadCount > 0 && (
+          <Button
+            variant="outline" size="sm" className="gap-1.5"
+            onClick={() => markAllReadMutation.mutate()}
+            disabled={markAllReadMutation.isPending}
+          >
+            <CheckCheck className="h-4 w-4" />
+            Mark All Read
+          </Button>
+        )}
+      </div>
+
+      {/* Notifications list */}
+      {isLoading ? (
+        <div className="space-y-3">
+          {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
+        </div>
+      ) : (notifications ?? []).length === 0 ? (
+        <Card>
+          <CardContent className="flex flex-col items-center py-16 text-center">
+            <BellOff className="h-12 w-12 text-muted-foreground/30 mb-4" />
+            <p className="text-base font-medium text-muted-foreground">No notifications</p>
+            <p className="text-sm text-muted-foreground/70 mt-1">Health dues, kidding reminders, and weight alerts will appear here</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {(notifications as {
+            id: number; type: string; message: string; isRead: boolean;
+            createdAt: Date | string; relatedGoatId?: number | null;
+          }[]).map(n => (
+            <div
+              key={n.id}
+              className={`flex items-start gap-4 p-4 rounded-xl border transition-colors ${
+                n.isRead ? "bg-background border-border/50" : "bg-primary/5 border-primary/20"
+              }`}
+            >
+              <div className={`mt-0.5 p-2 rounded-lg shrink-0 ${n.isRead ? "bg-muted" : "bg-primary/10"}`}>
+                <Bell className={`h-4 w-4 ${n.isRead ? "text-muted-foreground" : "text-primary"}`} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap mb-1">
+                  <Badge variant="outline" className={`text-xs ${TYPE_COLORS[n.type] ?? TYPE_COLORS.General}`}>
+                    {TYPE_LABELS[n.type] ?? n.type}
+                  </Badge>
+                  {!n.isRead && <span className="h-2 w-2 rounded-full bg-primary" />}
+                </div>
+                <p className={`text-sm ${n.isRead ? "text-muted-foreground" : "text-foreground"}`}>{n.message}</p>
+                <div className="flex items-center gap-3 mt-1.5">
+                  <p className="text-xs text-muted-foreground">{new Date(n.createdAt).toLocaleString()}</p>
+                  {n.relatedGoatId && (
+                    <button
+                      className="text-xs text-primary hover:underline"
+                      onClick={() => setLocation(`/goats/${n.relatedGoatId}`)}
+                    >
+                      View Goat
+                    </button>
+                  )}
+                </div>
+              </div>
+              {!n.isRead && (
+                <Button
+                  variant="ghost" size="sm"
+                  className="shrink-0 h-8 w-8 p-0"
+                  onClick={() => markReadMutation.mutate({ id: n.id })}
+                  disabled={markReadMutation.isPending}
+                  title="Mark as read"
+                >
+                  <Check className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

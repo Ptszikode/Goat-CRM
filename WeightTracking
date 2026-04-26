@@ -1,0 +1,206 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import { AlertTriangle, Plus, Scale } from "lucide-react";
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { toast } from "sonner";
+
+export default function WeightTracking() {
+  const [, setLocation] = useLocation();
+  const { user } = useAuth();
+  const canWrite = user?.role !== "viewer";
+
+  const { data: anomalies, isLoading: loadingAnomalies } = trpc.weight.getAnomalies.useQuery();
+  const { data: recentWeighins, isLoading: loadingRecent } = trpc.weight.getRecentWeighins.useQuery({ limit: 20 });
+  const utils = trpc.useUtils();
+
+  // Bulk weigh-in dialog
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkEntries, setBulkEntries] = useState<{ goatId: string; weightKg: string }[]>([{ goatId: "", weightKg: "" }]);
+  const [bulkDate, setBulkDate] = useState(new Date().toISOString().split("T")[0]!);
+  const [bulkMethod, setBulkMethod] = useState<"Scale" | "Tape_Measure" | "Estimate">("Scale");
+
+  const { data: goatList } = trpc.goats.list.useQuery({ isActive: true, page: 0, pageSize: 200 });
+
+  const bulkMutation = trpc.weight.bulkRecord.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Recorded ${data.count} weight entries`);
+      utils.weight.getRecentWeighins.invalidate();
+      utils.weight.getAnomalies.invalidate();
+      setBulkOpen(false);
+      setBulkEntries([{ goatId: "", weightKg: "" }]);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const handleBulkSubmit = () => {
+    const valid = bulkEntries.filter(e => e.goatId && e.weightKg);
+    if (valid.length === 0) { toast.error("Add at least one entry"); return; }
+    bulkMutation.mutate({
+      date: bulkDate,
+      method: bulkMethod,
+      entries: valid.map(e => ({ goatId: Number(e.goatId), weightKg: Number(e.weightKg) })),
+    });
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-serif font-semibold">Weight Tracking</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Monitor growth and detect anomalies</p>
+        </div>
+        {canWrite && (
+          <Button onClick={() => setBulkOpen(true)} className="gap-2">
+            <Scale className="h-4 w-4" />
+            Bulk Weigh-In
+          </Button>
+        )}
+      </div>
+
+      {/* Anomaly alerts */}
+      {(anomalies?.length ?? 0) > 0 && (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium flex items-center gap-2 text-amber-900">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              Weight Anomalies Detected (&gt;15% change)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {(anomalies as {
+              goatId: number; tagNumber: string; goatName?: string | null;
+              previousWeight: number; currentWeight: number; changePercent: number;
+              date: Date | string;
+            }[]).map(a => (
+              <div
+                key={a.goatId}
+                className="flex items-center justify-between p-3 rounded-lg bg-white border border-amber-200 cursor-pointer hover:bg-amber-50 transition-colors"
+                onClick={() => setLocation(`/goats/${a.goatId}`)}
+              >
+                <div>
+                  <p className="text-sm font-medium">{a.tagNumber}{a.goatName ? ` — ${a.goatName}` : ""}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {a.previousWeight} kg → {a.currentWeight} kg
+                  </p>
+                </div>
+                <Badge className={`${a.changePercent > 0 ? "bg-emerald-100 text-emerald-800 border-emerald-200" : "bg-red-100 text-red-800 border-red-200"} border`}>
+                  {a.changePercent > 0 ? "+" : ""}{a.changePercent.toFixed(1)}%
+                </Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Recent weigh-ins */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-medium">Recent Weigh-Ins</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loadingRecent ? (
+            <div className="space-y-2">
+              {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          ) : (recentWeighins ?? []).length === 0 ? (
+            <div className="flex flex-col items-center py-8 text-center">
+              <Scale className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">No weight records yet</p>
+              {canWrite && (
+                <Button onClick={() => setBulkOpen(true)} className="mt-3 gap-2" size="sm">
+                  <Plus className="h-4 w-4" />
+                  Start Weigh-In
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="divide-y">
+              {(recentWeighins as {
+                id: number; goatId: number; tagNumber: string; goatName?: string | null;
+                weightKg: number; date: Date | string; method?: string | null;
+              }[]).map(w => (
+                <div
+                  key={w.id}
+                  className="flex items-center justify-between py-3 cursor-pointer hover:bg-muted/40 px-2 rounded-lg transition-colors"
+                  onClick={() => setLocation(`/goats/${w.goatId}`)}
+                >
+                  <div>
+                    <p className="text-sm font-medium">{w.tagNumber}{w.goatName ? ` — ${w.goatName}` : ""}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(w.date).toLocaleDateString()} · {w.method?.replace("_", " ") ?? "Scale"}</p>
+                  </div>
+                  <span className="text-sm font-semibold">{w.weightKg} kg</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Bulk weigh-in dialog */}
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Bulk Weigh-In</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Date *</Label>
+                <Input type="date" value={bulkDate} onChange={e => setBulkDate(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Method</Label>
+                <Select value={bulkMethod} onValueChange={v => setBulkMethod(v as typeof bulkMethod)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Scale">Scale</SelectItem>
+                    <SelectItem value="Tape_Measure">Tape Measure</SelectItem>
+                    <SelectItem value="Estimate">Estimate</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Entries</Label>
+              {bulkEntries.map((entry, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <Select value={entry.goatId} onValueChange={v => setBulkEntries(prev => prev.map((e, i) => i === idx ? { ...e, goatId: v } : e))}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Select goat" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(goatList?.goats ?? []).map((g: { id: number; tagNumber: string; name?: string | null }) => (
+                        <SelectItem key={g.id} value={String(g.id)}>{g.tagNumber}{g.name ? ` — ${g.name}` : ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    type="number" step="0.1" placeholder="kg" className="w-24"
+                    value={entry.weightKg}
+                    onChange={e => setBulkEntries(prev => prev.map((en, i) => i === idx ? { ...en, weightKg: e.target.value } : en))}
+                  />
+                  <Button variant="ghost" size="sm" className="text-destructive" onClick={() => setBulkEntries(prev => prev.filter((_, i) => i !== idx))}>×</Button>
+                </div>
+              ))}
+              <Button variant="outline" size="sm" className="w-full gap-2" onClick={() => setBulkEntries(prev => [...prev, { goatId: "", weightKg: "" }])}>
+                <Plus className="h-3.5 w-3.5" />
+                Add Row
+              </Button>
+            </div>
+            <Button className="w-full" onClick={handleBulkSubmit} disabled={bulkMutation.isPending}>
+              {bulkMutation.isPending ? "Saving..." : "Save All Weights"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

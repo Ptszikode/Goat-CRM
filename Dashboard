@@ -1,0 +1,357 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { trpc } from "@/lib/trpc";
+import {
+  Activity,
+  AlertCircle,
+  Baby,
+  BarChart3,
+  Calendar,
+  DollarSign,
+  Heart,
+  Plus,
+  TrendingDown,
+  TrendingUp,
+  Wheat,
+} from "lucide-react";
+import { useEffect } from "react";
+import { useLocation } from "wouter";
+import {
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+} from "recharts";
+
+const COLORS = ["#3d7a5c", "#c9a84c", "#e05c3a", "#4a8fa8", "#8b6fa8", "#6b8e6b"];
+
+function StatCard({
+  title,
+  value,
+  icon: Icon,
+  sub,
+  trend,
+  color = "primary",
+}: {
+  title: string;
+  value: string | number;
+  icon: React.ElementType;
+  sub?: string;
+  trend?: { value: number; label: string };
+  color?: string;
+}) {
+  return (
+    <Card className="relative overflow-hidden">
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{title}</p>
+            <p className="text-3xl font-serif font-semibold mt-1 text-foreground">{value}</p>
+            {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
+            {trend && (
+              <div className={`flex items-center gap-1 mt-2 text-xs font-medium ${trend.value >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                {trend.value >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                {Math.abs(trend.value)}% {trend.label}
+              </div>
+            )}
+          </div>
+          <div className={`p-3 rounded-xl bg-primary/10`}>
+            <Icon className="h-5 w-5 text-primary" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function Dashboard() {
+  const [, setLocation] = useLocation();
+  const { data, isLoading } = trpc.reports.getDashboard.useQuery();
+
+  useEffect(() => {
+    document.title = "GOAT Farm CRM — Herd Management Dashboard";
+
+    const setMeta = (name: string, content: string) => {
+      let el = document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
+      if (!el) {
+        el = document.createElement("meta");
+        el.setAttribute("name", name);
+        document.head.appendChild(el);
+      }
+      el.setAttribute("content", content);
+    };
+
+    setMeta(
+      "description",
+      "GOAT Farm CRM is a professional goat farm management system for tracking herd health, breeding, weight, transactions, and reports."
+    );
+    setMeta(
+      "keywords",
+      "goat farm management, goat CRM, herd management, livestock tracking, goat health records, breeding management, goat weight tracking, farm reports"
+    );
+
+    return () => {
+      document.title = "GOAT Farm CRM";
+    };
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-9 w-32" />
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Skeleton className="h-64 rounded-xl" />
+          <Skeleton className="h-64 rounded-xl" />
+        </div>
+      </div>
+    );
+  }
+
+  const summary = data?.herdSummary;
+  const upcomingDue = data?.upcomingDue ?? [];
+  const recentTxns = data?.recentTransactions ?? [];
+  const breedsList = data?.breedsList ?? [];
+
+  // Build breed breakdown for pie chart
+  const breedBreakdown = Object.entries(summary?.byBreed ?? {}).map(([breedId, count]) => {
+    const breed = breedsList.find((br: { id: number; name: string }) => br.id === Number(breedId));
+    return { name: breed?.name ?? `Breed ${breedId}`, value: count as number };
+  });
+
+  const genderBreakdown = [
+    { name: "Does", value: summary?.byGender?.["Doe"] ?? 0 },
+    { name: "Bucks", value: summary?.byGender?.["Buck"] ?? 0 },
+    { name: "Wethers", value: summary?.byGender?.["Wether"] ?? 0 },
+  ].filter(g => g.value > 0);
+
+  return (
+    <div className="space-y-6">
+      {/* Page header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-serif font-semibold text-foreground">Dashboard</h1>
+          <h2 className="text-sm text-muted-foreground mt-0.5 font-normal">
+            {new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+          </h2>
+        </div>
+        <Button onClick={() => setLocation("/goats/new")} className="gap-2">
+          <Plus className="h-4 w-4" />
+          Add Goat
+        </Button>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="Total Active Goats"
+          value={summary?.total ?? 0}
+          icon={Wheat}
+          sub={`${(summary?.byHealth?.["Deceased"] ?? 0)} deceased recorded`}
+        />
+        <StatCard
+          title="Healthy"
+          value={summary?.byHealth?.["Healthy"] ?? 0}
+          icon={Heart}
+          sub={`${summary?.byHealth?.["Sick"] ?? 0} sick · ${summary?.byHealth?.["Under_Treatment"] ?? 0} in treatment`}
+        />
+        <StatCard
+          title="Does"
+          value={summary?.byGender?.["Doe"] ?? 0}
+          icon={Baby}
+          sub={`${summary?.byGender?.["Buck"] ?? 0} bucks · ${summary?.byGender?.["Wether"] ?? 0} wethers`}
+        />
+        <StatCard
+          title="Health Dues (14d)"
+          value={upcomingDue.length}
+          icon={Calendar}
+          sub="Upcoming vaccinations/treatments"
+        />
+      </div>
+
+      {/* Charts row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Breed breakdown */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <BarChart3 className="h-4 w-4 text-primary" />
+              Herd by Breed
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {breedBreakdown.length > 0 ? (
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie
+                    data={breedBreakdown}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={55}
+                    outerRadius={85}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    {breedBreakdown.map((_: unknown, index: number) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(v: number) => [`${v} goats`, ""]} />
+                  <Legend iconType="circle" iconSize={8} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
+                No breed data yet
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Gender breakdown */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <Activity className="h-4 w-4 text-primary" />
+              Herd by Gender
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {genderBreakdown.length > 0 ? (
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie
+                    data={genderBreakdown}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={55}
+                    outerRadius={85}
+                    paddingAngle={3}
+                    dataKey="value"
+                  >
+                    {genderBreakdown.map((_: unknown, index: number) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(v: number) => [`${v} goats`, ""]} />
+                  <Legend iconType="circle" iconSize={8} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-muted-foreground text-sm">
+                No data yet
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Bottom row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Upcoming health dues */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-medium flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-500" />
+                Upcoming Health Dues
+              </CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => setLocation("/health")} className="text-xs h-7">
+                View all
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {upcomingDue.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No upcoming health dues</p>
+            ) : (
+              upcomingDue.slice(0, 5).map((due: {
+                id: number;
+                tagNumber: string;
+                goatName?: string | null;
+                recordType: string;
+                nextDueDate: Date | string | null;
+              }) => (
+                <div
+                  key={due.id}
+                  className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors cursor-pointer"
+                  onClick={() => setLocation(`/goats/${due.id}`)}
+                >
+                  <div>
+                    <p className="text-sm font-medium">{due.tagNumber}{due.goatName ? ` — ${due.goatName}` : ""}</p>
+                    <p className="text-xs text-muted-foreground">{due.recordType}</p>
+                  </div>
+                  <Badge variant="outline" className="text-xs">
+                    {due.nextDueDate ? new Date(due.nextDueDate).toLocaleDateString() : "—"}
+                  </Badge>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Recent transactions */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-medium flex items-center gap-2">
+                <DollarSign className="h-4 w-4 text-primary" />
+                Recent Transactions
+              </CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => setLocation("/transactions")} className="text-xs h-7">
+                View all
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {recentTxns.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No transactions yet</p>
+            ) : (
+              recentTxns.map((txn: {
+                id: number;
+                transactionType: string;
+                price?: number | null;
+                currency?: string | null;
+                counterpartyName?: string | null;
+                date: Date | string;
+                tagNumber?: string | null;
+                goatName?: string | null;
+              }) => (
+                <div key={txn.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className={`text-xs ${txn.transactionType === "Sale" ? "text-emerald-700 border-emerald-300 bg-emerald-50" : "text-blue-700 border-blue-300 bg-blue-50"}`}
+                      >
+                        {txn.transactionType}
+                      </Badge>
+                      {txn.counterpartyName && (
+                        <span className="text-xs text-muted-foreground">{txn.counterpartyName}</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">{new Date(txn.date).toLocaleDateString()}</p>
+                  </div>
+                  {txn.price != null && (
+                    <span className={`text-sm font-semibold ${txn.transactionType === "Sale" ? "text-emerald-600" : "text-blue-600"}`}>
+                      {txn.transactionType === "Sale" ? "+" : "-"}{txn.currency ?? "USD"} {txn.price.toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

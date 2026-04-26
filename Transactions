@@ -1,0 +1,281 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import { DollarSign, Plus, TrendingDown, TrendingUp } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+const TXN_BADGE: Record<string, string> = {
+  Sale: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  Purchase: "bg-blue-100 text-blue-800 border-blue-200",
+  Transfer: "bg-purple-100 text-purple-800 border-purple-200",
+  Death_Loss: "bg-red-100 text-red-800 border-red-200",
+  Gift: "bg-amber-100 text-amber-800 border-amber-200",
+};
+
+export default function Transactions() {
+  const { user } = useAuth();
+  const canWrite = user?.role !== "viewer";
+
+  const [page, setPage] = useState(0);
+  const [typeFilter, setTypeFilter] = useState("");
+  const PAGE_SIZE = 20;
+
+  const { data: rawTxns, isLoading } = trpc.transactions.list.useQuery({ type: typeFilter || undefined });
+  const { data: summary } = trpc.transactions.getFinancialSummary.useQuery({});
+  const utils = trpc.useUtils();
+
+  const { data: goatList } = trpc.goats.list.useQuery({ isActive: true, page: 0, pageSize: 200 });
+
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    goatId: "", transactionType: "Sale" as "Sale" | "Purchase" | "Transfer" | "Death_Loss" | "Gift",
+    date: new Date().toISOString().split("T")[0]!, price: "", currency: "USD",
+    counterpartyName: "", counterpartyContact: "", invoiceRef: "", notes: "",
+  });
+
+  const createMutation = trpc.transactions.recordSale.useMutation({
+    onSuccess: () => {
+      toast.success("Transaction recorded");
+      utils.transactions.list.invalidate();
+      utils.transactions.getFinancialSummary.invalidate();
+      setOpen(false);
+      setForm(f => ({ ...f, goatId: "", price: "", counterpartyName: "", counterpartyContact: "", invoiceRef: "", notes: "" }));
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const txns = rawTxns ?? [];
+  const total = txns.length;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+  const pagedTxns = txns.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-serif font-semibold">Transactions</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Sales, purchases, and financial records</p>
+        </div>
+        {canWrite && (
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button className="gap-2"><Plus className="h-4 w-4" />New Transaction</Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader><DialogTitle>Record Transaction</DialogTitle></DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Goat *</Label>
+                  <Select value={form.goatId} onValueChange={v => setForm(f => ({ ...f, goatId: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Select goat" /></SelectTrigger>
+                    <SelectContent>
+                      {(goatList?.goats ?? []).map((g: { id: number; tagNumber: string; name?: string | null }) => (
+                        <SelectItem key={g.id} value={String(g.id)}>{g.tagNumber}{g.name ? ` — ${g.name}` : ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Type *</Label>
+                    <Select value={form.transactionType} onValueChange={v => setForm(f => ({ ...f, transactionType: v as typeof f.transactionType }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Sale">Sale</SelectItem>
+                        <SelectItem value="Purchase">Purchase</SelectItem>
+                        <SelectItem value="Transfer">Transfer</SelectItem>
+                        <SelectItem value="Death_Loss">Death/Loss</SelectItem>
+                        <SelectItem value="Gift">Gift</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Date *</Label>
+                    <Input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Price</Label>
+                    <Input type="number" step="0.01" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} placeholder="0.00" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Currency</Label>
+                    <Input value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))} placeholder="USD" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Buyer/Seller Name</Label>
+                    <Input value={form.counterpartyName} onChange={e => setForm(f => ({ ...f, counterpartyName: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Contact</Label>
+                    <Input value={form.counterpartyContact} onChange={e => setForm(f => ({ ...f, counterpartyContact: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Invoice Reference</Label>
+                  <Input value={form.invoiceRef} onChange={e => setForm(f => ({ ...f, invoiceRef: e.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Notes</Label>
+                  <Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={() => {
+                    const payload = {
+                      goatId: Number(form.goatId),
+                      date: form.date,
+                      price: form.price ? Number(form.price) : 0,
+                      currency: form.currency || undefined,
+                      buyerName: form.counterpartyName || undefined,
+                      buyerContact: form.counterpartyContact || undefined,
+                      notes: form.notes || undefined,
+                    };
+                    createMutation.mutate(payload);
+                  }}
+                  disabled={createMutation.isPending || !form.goatId}
+                >
+                  {createMutation.isPending ? "Saving..." : "Record Transaction"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+
+      {/* Summary cards */}
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-emerald-100"><TrendingUp className="h-4 w-4 text-emerald-600" /></div>
+              <div>
+                <p className="text-xl font-serif font-semibold">{(summary.totalRevenue ?? 0).toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">Total Revenue</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-blue-100"><TrendingDown className="h-4 w-4 text-blue-600" /></div>
+              <div>
+                <p className="text-xl font-serif font-semibold">{(summary.totalSpend ?? 0).toLocaleString()}</p>
+                <p className="text-xs text-muted-foreground">Total Spend</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className={`p-2 rounded-lg ${(summary.net ?? 0) >= 0 ? "bg-emerald-100" : "bg-red-100"}`}>
+                <DollarSign className={`h-4 w-4 ${(summary.net ?? 0) >= 0 ? "text-emerald-600" : "text-red-600"}`} />
+              </div>
+              <div>
+                <p className={`text-xl font-serif font-semibold ${(summary.net ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+                  {(summary.net ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-muted-foreground">Net</p>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10"><DollarSign className="h-4 w-4 text-primary" /></div>
+              <div>
+                <p className="text-xl font-serif font-semibold">{txns.length}</p>
+                <p className="text-xs text-muted-foreground">Total Transactions</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Filter */}
+      <div className="flex gap-3">
+        <Select value={typeFilter} onValueChange={v => { setTypeFilter(v === "all" ? "" : v); setPage(0); }}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="All Types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="Sale">Sale</SelectItem>
+            <SelectItem value="Purchase">Purchase</SelectItem>
+            <SelectItem value="Transfer">Transfer</SelectItem>
+            <SelectItem value="Death_Loss">Death/Loss</SelectItem>
+            <SelectItem value="Gift">Gift</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Table */}
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-6 space-y-3">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+          ) : txns.length === 0 ? (
+            <div className="flex flex-col items-center py-12 text-center">
+              <DollarSign className="h-10 w-10 text-muted-foreground/30 mb-3" />
+              <p className="text-sm text-muted-foreground">No transactions found</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Date</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Goat</TableHead>
+                  <TableHead>Buyer/Seller</TableHead>
+                  <TableHead>Invoice Ref</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(pagedTxns as {
+                  id: number; date: Date | string; transactionType: string;
+                  tagNumber?: string | null; goatName?: string | null;
+                  counterpartyName?: string | null; invoiceRef?: string | null;
+                  price?: number | null; currency?: string | null;
+                }[]).map(txn => (
+                  <TableRow key={txn.id} className="hover:bg-muted/40">
+                    <TableCell className="text-sm">{new Date(txn.date).toLocaleDateString()}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={`text-xs ${TXN_BADGE[txn.transactionType] ?? ""}`}>
+                        {txn.transactionType.replace("_", " ")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm font-mono">{txn.tagNumber ?? "—"}{txn.goatName ? ` (${txn.goatName})` : ""}</TableCell>
+                    <TableCell className="text-sm">{txn.counterpartyName ?? "—"}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{txn.invoiceRef ?? "—"}</TableCell>
+                    <TableCell className={`text-right text-sm font-semibold ${txn.transactionType === "Sale" ? "text-emerald-600" : txn.transactionType === "Purchase" ? "text-blue-600" : ""}`}>
+                      {txn.price != null ? `${txn.currency ?? "USD"} ${txn.price.toLocaleString()}` : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>Page {page + 1} of {totalPages}</span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>Prev</Button>
+            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>Next</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

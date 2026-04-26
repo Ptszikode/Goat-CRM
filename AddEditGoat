@@ -1,0 +1,286 @@
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import { ArrowLeft, Save } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useLocation, useParams } from "wouter";
+import { toast } from "sonner";
+
+export default function AddEditGoat() {
+  const [, setLocation] = useLocation();
+  const params = useParams<{ id?: string }>();
+  const isEdit = !!params.id;
+  const goatId = params.id ? Number(params.id) : undefined;
+  const { user } = useAuth();
+
+  const { data: breeds } = trpc.reference.getBreeds.useQuery();
+  const { data: ageClasses } = trpc.reference.getAgeClasses.useQuery();
+  const { data: productionClasses } = trpc.reference.getProductionClasses.useQuery();
+  const { data: goatData, isLoading: loadingGoat } = trpc.goats.getById.useQuery(
+    { id: goatId! },
+    { enabled: isEdit }
+  );
+
+  const utils = trpc.useUtils();
+
+  const [form, setForm] = useState({
+    tagNumber: "",
+    name: "",
+    gender: "Doe" as "Doe" | "Buck" | "Wether",
+    breedId: "",
+    ageClassId: "",
+    productionClassId: "",
+    dateOfBirth: "",
+    weightKg: "",
+    locationCamp: "",
+    healthStatus: "Healthy" as string,
+    damId: "",
+    sireId: "",
+    isRegistered: false,
+    registrationNumber: "",
+    purchasePrice: "",
+    estimatedValue: "",
+  });
+
+  useEffect(() => {
+    if (goatData && isEdit) {
+      setForm({
+        tagNumber: goatData.tagNumber ?? "",
+        name: goatData.name ?? "",
+        gender: (goatData.gender as "Doe" | "Buck" | "Wether") ?? "Doe",
+        breedId: goatData.breedId ? String(goatData.breedId) : "",
+        ageClassId: goatData.ageClassId ? String(goatData.ageClassId) : "",
+        productionClassId: goatData.productionClassId ? String(goatData.productionClassId) : "",
+        dateOfBirth: goatData.dateOfBirth ? new Date(goatData.dateOfBirth).toISOString().split("T")[0]! : "",
+        weightKg: goatData.weightKg ? String(goatData.weightKg) : "",
+        locationCamp: goatData.locationCamp ?? "",
+        healthStatus: goatData.healthStatus ?? "Healthy",
+        damId: goatData.damId ? String(goatData.damId) : "",
+        sireId: goatData.sireId ? String(goatData.sireId) : "",
+        isRegistered: goatData.isRegistered ?? false,
+        registrationNumber: goatData.registrationNumber ?? "",
+        purchasePrice: goatData.purchasePrice ? String(goatData.purchasePrice) : "",
+        estimatedValue: goatData.estimatedValue ? String(goatData.estimatedValue) : "",
+      });
+    }
+  }, [goatData, isEdit]);
+
+  const createMutation = trpc.goats.create.useMutation({
+    onSuccess: (data) => {
+      toast.success("Goat added successfully");
+      utils.goats.list.invalidate();
+      setLocation("/goats");
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const updateMutation = trpc.goats.update.useMutation({
+    onSuccess: () => {
+      toast.success("Goat updated successfully");
+      utils.goats.list.invalidate();
+      if (goatId) utils.goats.getById.invalidate({ id: goatId });
+      setLocation(`/goats/${goatId}`);
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const payload = {
+      tagNumber: form.tagNumber,
+      name: form.name || undefined,
+      gender: form.gender,
+      breedId: form.breedId ? Number(form.breedId) : undefined,
+      ageClassId: form.ageClassId ? Number(form.ageClassId) : undefined,
+      productionClassId: form.productionClassId ? Number(form.productionClassId) : undefined,
+      dateOfBirth: form.dateOfBirth || undefined,
+      weightKg: form.weightKg ? Number(form.weightKg) : undefined,
+      locationCamp: form.locationCamp || undefined,
+      healthStatus: form.healthStatus as "Healthy" | "Sick" | "Under_Treatment" | "Quarantine" | "Deceased",
+      damId: form.damId ? Number(form.damId) : undefined,
+      sireId: form.sireId ? Number(form.sireId) : undefined,
+      isRegistered: form.isRegistered,
+      registrationNumber: form.registrationNumber || undefined,
+      purchasePrice: form.purchasePrice ? Number(form.purchasePrice) : undefined,
+      estimatedValue: form.estimatedValue ? Number(form.estimatedValue) : undefined,
+    };
+    if (isEdit && goatId) {
+      updateMutation.mutate({ id: goatId, ...payload });
+    } else {
+      createMutation.mutate(payload);
+    }
+  };
+
+  const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(f => ({ ...f, [field]: e.target.value }));
+
+  if (isEdit && loadingGoat) {
+    return (
+      <div className="space-y-4 max-w-2xl">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-96 w-full rounded-xl" />
+      </div>
+    );
+  }
+
+  const isPending = createMutation.isPending || updateMutation.isPending;
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="sm" onClick={() => setLocation(isEdit ? `/goats/${goatId}` : "/goats")} className="gap-2">
+          <ArrowLeft className="h-4 w-4" />
+          Back
+        </Button>
+        <h1 className="text-2xl font-serif font-semibold">{isEdit ? "Edit Goat" : "Add New Goat"}</h1>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Identity */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Identity</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Tag Number *</Label>
+              <Input value={form.tagNumber} onChange={set("tagNumber")} placeholder="e.g. G-001" required />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Name</Label>
+              <Input value={form.name} onChange={set("name")} placeholder="Optional name" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Gender *</Label>
+              <Select value={form.gender} onValueChange={v => setForm(f => ({ ...f, gender: v as "Doe" | "Buck" | "Wether" }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Doe">Doe (Female)</SelectItem>
+                  <SelectItem value="Buck">Buck (Male)</SelectItem>
+                  <SelectItem value="Wether">Wether (Castrated)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Breed</Label>
+              <Select value={form.breedId} onValueChange={v => setForm(f => ({ ...f, breedId: v === "none" ? "" : v }))}>
+                <SelectTrigger><SelectValue placeholder="Select breed" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Unknown</SelectItem>
+                  {breeds?.map(b => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Date of Birth</Label>
+              <Input type="date" value={form.dateOfBirth} onChange={set("dateOfBirth")} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Age Class</Label>
+              <Select value={form.ageClassId} onValueChange={v => setForm(f => ({ ...f, ageClassId: v === "none" ? "" : v }))}>
+                <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Unknown</SelectItem>
+                  {ageClasses?.map(a => <SelectItem key={a.id} value={String(a.id)}>{a.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Physical & Location */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Physical & Location</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Weight (kg)</Label>
+              <Input type="number" step="0.1" value={form.weightKg} onChange={set("weightKg")} placeholder="e.g. 45.5" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Camp / Location</Label>
+              <Input value={form.locationCamp} onChange={set("locationCamp")} placeholder="e.g. Camp A" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Production Class</Label>
+              <Select value={form.productionClassId} onValueChange={v => setForm(f => ({ ...f, productionClassId: v === "none" ? "" : v }))}>
+                <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {productionClasses?.map(p => <SelectItem key={p.id} value={String(p.id)}>{p.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Health Status</Label>
+              <Select value={form.healthStatus} onValueChange={v => setForm(f => ({ ...f, healthStatus: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Healthy">Healthy</SelectItem>
+                  <SelectItem value="Sick">Sick</SelectItem>
+                  <SelectItem value="Under_Treatment">Under Treatment</SelectItem>
+                  <SelectItem value="Quarantine">Quarantine</SelectItem>
+                  <SelectItem value="Deceased">Deceased</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Lineage */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Lineage & Registration</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Dam ID (Mother)</Label>
+              <Input type="number" value={form.damId} onChange={set("damId")} placeholder="Goat ID" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Sire ID (Father)</Label>
+              <Input type="number" value={form.sireId} onChange={set("sireId")} placeholder="Goat ID" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Registration Number</Label>
+              <Input value={form.registrationNumber} onChange={set("registrationNumber")} placeholder="Official reg #" />
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Financial */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Financial</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Purchase Price</Label>
+              <Input type="number" step="0.01" value={form.purchasePrice} onChange={set("purchasePrice")} placeholder="0.00" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Estimated Value</Label>
+              <Input type="number" step="0.01" value={form.estimatedValue} onChange={set("estimatedValue")} placeholder="0.00" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex gap-3 pt-2">
+          <Button type="submit" disabled={isPending} className="gap-2">
+            <Save className="h-4 w-4" />
+            {isPending ? "Saving..." : isEdit ? "Save Changes" : "Add Goat"}
+          </Button>
+          <Button type="button" variant="outline" onClick={() => setLocation(isEdit ? `/goats/${goatId}` : "/goats")}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+}

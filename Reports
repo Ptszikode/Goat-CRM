@@ -1,0 +1,244 @@
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { trpc } from "@/lib/trpc";
+import { BarChart3, Download, FileText } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+function downloadCSV(data: Record<string, unknown>[], filename: string) {
+  if (!data.length) { toast.error("No data to export"); return; }
+  const headers = Object.keys(data[0]!);
+  const rows = data.map(row => headers.map(h => JSON.stringify(row[h] ?? "")).join(","));
+  const csv = [headers.join(","), ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function Reports() {
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+
+  const { data: herdSummary, isLoading: loadingHerd } = trpc.reports.herdSummary.useQuery();
+  const { data: mortality, isLoading: loadingMortality } = trpc.reports.mortalityReport.useQuery({ startDate: startDate || undefined, endDate: endDate || undefined });
+  const { data: financial, isLoading: loadingFinancial } = trpc.reports.financialSummary.useQuery({ startDate: startDate || undefined, endDate: endDate || undefined });
+  const { data: breedingPerf, isLoading: loadingBreeding } = trpc.reports.breedingPerformance.useQuery();
+
+  const reportCards = [
+    {
+      title: "Herd Summary",
+      description: "Total active goats, breakdown by breed, gender, age class, camp, and health status",
+      icon: BarChart3,
+      isLoading: loadingHerd,
+      data: herdSummary,
+      onExport: () => {
+        if (!herdSummary?.summary) return;
+        const s = herdSummary.summary;
+        const rows: Record<string, unknown>[] = [
+          { metric: "Total Active Goats", value: s.total },
+          { metric: "Average Weight (kg)", value: s.avgWeight?.toFixed(1) ?? "—" },
+          ...Object.entries(s.byGender ?? {}).map(([k, v]) => ({ metric: `Gender: ${k}`, value: v })),
+          ...Object.entries(s.byHealth ?? {}).map(([k, v]) => ({ metric: `Health: ${k}`, value: v })),
+          ...Object.entries(s.byCamp ?? {}).map(([k, v]) => ({ metric: `Camp: ${k}`, value: v })),
+        ];
+        downloadCSV(rows, "herd-summary.csv");
+      },
+      content: herdSummary?.summary ? (() => {
+        const s = herdSummary.summary!;
+        return (
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">By Gender</p>
+              {Object.entries(s.byGender ?? {}).map(([k, v]) => (
+                <div key={k} className="flex justify-between text-sm py-1 border-b border-border/50">
+                  <span>{k}</span><span className="font-medium">{v as number}</span>
+                </div>
+              ))}
+            </div>
+            <div>
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">By Health Status</p>
+              {Object.entries(s.byHealth ?? {}).map(([k, v]) => (
+                <div key={k} className="flex justify-between text-sm py-1 border-b border-border/50">
+                  <span>{k.replace("_", " ")}</span><span className="font-medium">{v as number}</span>
+                </div>
+              ))}
+            </div>
+            <div className="col-span-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">By Camp</p>
+              {Object.keys(s.byCamp ?? {}).length === 0 ? (
+                <p className="text-sm text-muted-foreground">No camp data</p>
+              ) : (
+                Object.entries(s.byCamp ?? {}).map(([k, v]) => (
+                  <div key={k} className="flex justify-between text-sm py-1 border-b border-border/50">
+                    <span>{k}</span><span className="font-medium">{v as number}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })() : null,
+    },
+    {
+      title: "Mortality Report",
+      description: "Deceased goats within the selected date range",
+      icon: FileText,
+      isLoading: loadingMortality,
+      data: mortality,
+      onExport: () => {
+        if (!mortality) return;
+        downloadCSV((mortality as Record<string, unknown>[]), "mortality-report.csv");
+      },
+      content: mortality ? (
+        <div>
+          <p className="text-sm text-muted-foreground mb-3">{(mortality as unknown[]).length} deceased goat{(mortality as unknown[]).length !== 1 ? "s" : ""} found</p>
+          {(mortality as { id: number; tagNumber: string; name?: string | null; dateOfBirth?: Date | string | null; updatedAt: Date | string }[]).slice(0, 5).map(g => (
+            <div key={g.id} className="flex justify-between text-sm py-2 border-b border-border/50">
+              <span className="font-mono">{g.tagNumber}{g.name ? ` — ${g.name}` : ""}</span>
+              <span className="text-muted-foreground">{new Date(g.updatedAt).toLocaleDateString()}</span>
+            </div>
+          ))}
+          {(mortality as unknown[]).length > 5 && <p className="text-xs text-muted-foreground mt-2">+{(mortality as unknown[]).length - 5} more — export CSV for full list</p>}
+        </div>
+      ) : null,
+    },
+    {
+      title: "Financial Summary",
+      description: "Revenue, expenses, and net profit for the selected period",
+      icon: BarChart3,
+      isLoading: loadingFinancial,
+      data: financial,
+      onExport: () => {
+        if (!financial) return;
+        const rows = [
+          { metric: "Total Revenue", value: financial.totalRevenue },
+          { metric: "Total Spend", value: financial.totalSpend },
+          { metric: "Net", value: financial.net },
+          { metric: "Total Sales", value: financial.totalSales },
+          { metric: "Total Purchases", value: financial.totalPurchases },
+        ];
+        downloadCSV(rows, "financial-summary.csv");
+      },
+      content: financial ? (
+        <div className="space-y-2">
+          {[
+            ["Total Revenue", financial.totalRevenue, "text-emerald-700"],
+            ["Total Spend", financial.totalSpend, "text-blue-700"],
+            ["Net", financial.net, (financial.net ?? 0) >= 0 ? "text-emerald-700" : "text-red-700"],
+          ].map(([label, value, color]) => (
+            <div key={label as string} className="flex justify-between text-sm py-2 border-b border-border/50">
+              <span>{label as string}</span>
+              <span className={`font-semibold ${color as string}`}>{(value as number).toLocaleString()}</span>
+            </div>
+          ))}
+        </div>
+      ) : null,
+    },
+    {
+      title: "Breeding Performance",
+      description: "Mating success rates, kidding statistics, and survival rates",
+      icon: BarChart3,
+      isLoading: loadingBreeding,
+      data: breedingPerf,
+      onExport: () => {
+        if (!breedingPerf) return;
+        const rows = [
+          { metric: "Total Matings", value: breedingPerf.totalMatings },
+          { metric: "Completed Kiddings", value: breedingPerf.completedKiddings },
+          { metric: "Avg Kids per Birth", value: breedingPerf.avgKidsPerBirth?.toFixed(2) },
+          { metric: "Survival Rate (%)", value: breedingPerf.survivalRate?.toFixed(1) },
+        ];
+        downloadCSV(rows, "breeding-performance.csv");
+      },
+      content: breedingPerf ? (
+        <div className="space-y-2">
+          {[
+            ["Total Matings", breedingPerf.totalMatings],
+            ["Completed Kiddings", breedingPerf.completedKiddings],
+            ["Avg Kids per Birth", breedingPerf.avgKidsPerBirth?.toFixed(2) ?? "—"],
+            ["Survival Rate", `${breedingPerf.survivalRate?.toFixed(1) ?? "—"}%`],
+          ].map(([label, value]) => (
+            <div key={label as string} className="flex justify-between text-sm py-2 border-b border-border/50">
+              <span>{label as string}</span>
+              <span className="font-medium">{value as string}</span>
+            </div>
+          ))}
+        </div>
+      ) : null,
+    },
+  ];
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-serif font-semibold">Reports</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">Generate and export farm reports</p>
+      </div>
+
+      {/* Date range filter */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-end gap-4 flex-wrap">
+            <div className="space-y-1.5">
+              <Label>Start Date</Label>
+              <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-40" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>End Date</Label>
+              <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-40" />
+            </div>
+            {(startDate || endDate) && (
+              <Button variant="outline" size="sm" onClick={() => { setStartDate(""); setEndDate(""); }}>
+                Clear Dates
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Report cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {reportCards.map(report => (
+          <Card key={report.title}>
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <report.icon className="h-4 w-4 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-medium">{report.title}</CardTitle>
+                    <p className="text-xs text-muted-foreground mt-0.5">{report.description}</p>
+                  </div>
+                </div>
+                <Button
+                  variant="outline" size="sm" className="gap-1.5 text-xs shrink-0"
+                  onClick={report.onExport}
+                  disabled={!report.data || report.isLoading}
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  CSV
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {report.isLoading ? (
+                <div className="space-y-2">
+                  {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+                </div>
+              ) : report.content ?? (
+                <p className="text-sm text-muted-foreground text-center py-4">No data available</p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}

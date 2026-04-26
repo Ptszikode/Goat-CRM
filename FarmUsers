@@ -1,0 +1,233 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import { Settings, Shield, Trash2, Users } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+const ROLE_BADGE: Record<string, string> = {
+  admin: "bg-red-100 text-red-800 border-red-200",
+  farmer: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  viewer: "bg-gray-100 text-gray-700 border-gray-200",
+};
+
+export default function FarmUsers() {
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === "admin";
+
+  const { data: farm } = trpc.farm.getFarm.useQuery();
+  const { data: users, isLoading } = trpc.farm.getUsers.useQuery();
+  const utils = trpc.useUtils();
+
+  const [farmName, setFarmName] = useState("");
+  const [farmLocation, setFarmLocation] = useState("");
+  const [editFarmOpen, setEditFarmOpen] = useState(false);
+
+  const upsertFarmMutation = trpc.farm.upsertFarm.useMutation({
+    onSuccess: () => {
+      toast.success("Farm settings saved");
+      utils.farm.getFarm.invalidate();
+      setEditFarmOpen(false);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const updateRoleMutation = trpc.farm.updateUserRole.useMutation({
+    onSuccess: () => {
+      toast.success("Role updated");
+      utils.farm.getUsers.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const removeUserMutation = trpc.farm.removeUser.useMutation({
+    onSuccess: () => {
+      toast.success("User removed from farm");
+      utils.farm.getUsers.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const openEditFarm = () => {
+    setFarmName(farm?.farmName ?? "");
+    setFarmLocation(farm?.location ?? "");
+    setEditFarmOpen(true);
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-serif font-semibold">Farm & Users</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Manage farm settings and user access</p>
+        </div>
+        {isAdmin && (
+          <Button variant="outline" className="gap-2" onClick={openEditFarm}>
+            <Settings className="h-4 w-4" />
+            Farm Settings
+          </Button>
+        )}
+      </div>
+
+      {/* Farm info */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-medium flex items-center gap-2">
+            <Shield className="h-4 w-4 text-primary" />
+            Farm Information
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {farm ? (
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Farm Name</p>
+                <p className="font-medium">{farm.farmName ?? "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Location</p>
+                <p className="font-medium">{farm.location ?? "—"}</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No farm configured yet. {isAdmin ? "Click Farm Settings to set up your farm." : "Ask an admin to configure the farm."}</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Users */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-medium flex items-center gap-2">
+            <Users className="h-4 w-4 text-primary" />
+            Farm Users
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-3">
+              {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
+            </div>
+          ) : (users ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">No users found</p>
+          ) : (
+            <div className="space-y-2">
+              {(users as {
+                id: number; name?: string | null; email?: string | null;
+                role: string; farmRole?: string | null; lastSignedIn?: Date | string | null;
+              }[]).map(u => (
+                <div key={u.id} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/30 transition-colors">
+                  <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <span className="text-sm font-semibold text-primary">
+                      {(u.name ?? u.email ?? "?").charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{u.name ?? "Unnamed User"}</p>
+                    <p className="text-xs text-muted-foreground truncate">{u.email ?? "No email"}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className={`text-xs ${ROLE_BADGE[u.farmRole ?? u.role] ?? ROLE_BADGE.viewer}`}>
+                      {u.farmRole ?? u.role}
+                    </Badge>
+                    {isAdmin && u.id !== currentUser?.id && (
+                      <>
+                        <Select
+                          value={u.farmRole ?? u.role}
+                          onValueChange={v => updateRoleMutation.mutate({ userId: u.id, role: v as "admin" | "farmer" | "viewer" })}
+                        >
+                          <SelectTrigger className="h-7 w-28 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="farmer">Farmer</SelectItem>
+                            <SelectItem value="viewer">Viewer</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="ghost" size="sm"
+                          className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => {
+                            if (confirm(`Remove ${u.name ?? "this user"} from the farm?`)) {
+                              removeUserMutation.mutate({ userId: u.id });
+                            }
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
+                    {u.id === currentUser?.id && (
+                      <span className="text-xs text-muted-foreground">(you)</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Role legend */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-medium">Role Permissions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            {[
+              { role: "Admin", badge: ROLE_BADGE.admin, perms: ["Full access", "Manage users", "Delete records", "Farm settings", "All reports"] },
+              { role: "Farmer", badge: ROLE_BADGE.farmer, perms: ["Add/edit goats", "Log health records", "Record weights", "Record transactions", "View all data"] },
+              { role: "Viewer", badge: ROLE_BADGE.viewer, perms: ["View all records", "Export reports", "No write access", "No delete access"] },
+            ].map(({ role, badge, perms }) => (
+              <div key={role} className="p-3 rounded-lg border border-border">
+                <Badge variant="outline" className={`text-xs mb-3 ${badge}`}>{role}</Badge>
+                <ul className="space-y-1">
+                  {perms.map(p => (
+                    <li key={p} className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Edit farm dialog */}
+      <Dialog open={editFarmOpen} onOpenChange={setEditFarmOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Farm Settings</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Farm Name</Label>
+              <Input value={farmName} onChange={e => setFarmName(e.target.value)} placeholder="My Goat Farm" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Location</Label>
+              <Input value={farmLocation} onChange={e => setFarmLocation(e.target.value)} placeholder="City, Country" />
+            </div>
+            <Button
+              className="w-full"
+              onClick={() => upsertFarmMutation.mutate({ farmName, location: farmLocation || undefined })}
+              disabled={upsertFarmMutation.isPending || !farmName}
+            >
+              {upsertFarmMutation.isPending ? "Saving..." : "Save Settings"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

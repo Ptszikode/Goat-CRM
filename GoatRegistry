@@ -1,0 +1,247 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import { ChevronLeft, ChevronRight, Filter, Plus, Search, Wheat } from "lucide-react";
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { toast } from "sonner";
+
+const HEALTH_BADGE: Record<string, string> = {
+  Healthy: "bg-emerald-100 text-emerald-800 border-emerald-200",
+  Sick: "bg-red-100 text-red-800 border-red-200",
+  Under_Treatment: "bg-amber-100 text-amber-800 border-amber-200",
+  Quarantine: "bg-orange-100 text-orange-800 border-orange-200",
+  Deceased: "bg-gray-100 text-gray-600 border-gray-200",
+};
+
+export default function GoatRegistry() {
+  const [, setLocation] = useLocation();
+  const { user } = useAuth();
+  const canWrite = user?.role !== "viewer";
+
+  const [search, setSearch] = useState("");
+  const [gender, setGender] = useState<string>("");
+  const [healthStatus, setHealthStatus] = useState<string>("");
+  const [breedId, setBreedId] = useState<string>("");
+  const [camp, setCamp] = useState<string>("");
+  const [page, setPage] = useState(0);
+  const [showInactive, setShowInactive] = useState(false);
+  const PAGE_SIZE = 20;
+
+  const { data: breeds } = trpc.reference.getBreeds.useQuery();
+  const { data: camps } = trpc.goats.getCamps.useQuery();
+
+  const { data, isLoading } = trpc.goats.list.useQuery({
+    search: search || undefined,
+    gender: gender || undefined,
+    healthStatus: healthStatus || undefined,
+    breedId: breedId ? Number(breedId) : undefined,
+    camp: camp || undefined,
+    page,
+    pageSize: PAGE_SIZE,
+    isActive: showInactive ? undefined : true,
+  });
+
+  const goats = data?.goats ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-serif font-semibold text-foreground">Goat Registry</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{total} goat{total !== 1 ? "s" : ""} found</p>
+        </div>
+        {canWrite && (
+          <Button onClick={() => setLocation("/goats/new")} className="gap-2">
+            <Plus className="h-4 w-4" />
+            Add Goat
+          </Button>
+        )}
+      </div>
+
+      {/* Filters */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-48">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by tag, name..."
+                value={search}
+                onChange={e => { setSearch(e.target.value); setPage(0); }}
+                className="pl-9"
+              />
+            </div>
+            <Select value={gender} onValueChange={v => { setGender(v === "all" ? "" : v); setPage(0); }}>
+              <SelectTrigger className="w-36">
+                <SelectValue placeholder="Gender" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Genders</SelectItem>
+                <SelectItem value="Doe">Doe</SelectItem>
+                <SelectItem value="Buck">Buck</SelectItem>
+                <SelectItem value="Wether">Wether</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={healthStatus} onValueChange={v => { setHealthStatus(v === "all" ? "" : v); setPage(0); }}>
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Health Status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="Healthy">Healthy</SelectItem>
+                <SelectItem value="Sick">Sick</SelectItem>
+                <SelectItem value="Under_Treatment">Under Treatment</SelectItem>
+                <SelectItem value="Quarantine">Quarantine</SelectItem>
+                <SelectItem value="Deceased">Deceased</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={breedId} onValueChange={v => { setBreedId(v === "all" ? "" : v); setPage(0); }}>
+              <SelectTrigger className="w-36">
+                <SelectValue placeholder="Breed" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Breeds</SelectItem>
+                {breeds?.map(b => <SelectItem key={b.id} value={String(b.id)}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {(camps?.length ?? 0) > 0 && (
+              <Select value={camp} onValueChange={v => { setCamp(v === "all" ? "" : v); setPage(0); }}>
+                <SelectTrigger className="w-36">
+                  <SelectValue placeholder="Camp" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Camps</SelectItem>
+                  {camps?.map(c => <SelectItem key={c} value={c!}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            <Button
+              variant={showInactive ? "default" : "outline"}
+              size="sm"
+              onClick={() => { setShowInactive(!showInactive); setPage(0); }}
+              className="gap-2"
+            >
+              <Filter className="h-3.5 w-3.5" />
+              {showInactive ? "Showing All" : "Active Only"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Table */}
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="p-6 space-y-3">
+              {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+            </div>
+          ) : goats.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <Wheat className="h-12 w-12 text-muted-foreground/30 mb-4" />
+              <p className="text-muted-foreground font-medium">No goats found</p>
+              <p className="text-sm text-muted-foreground mt-1">Try adjusting your filters or add a new goat</p>
+              {canWrite && (
+                <Button onClick={() => setLocation("/goats/new")} className="mt-4 gap-2">
+                  <Plus className="h-4 w-4" />
+                  Add First Goat
+                </Button>
+              )}
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-28">Tag #</TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Breed</TableHead>
+                  <TableHead>Gender</TableHead>
+                  <TableHead>Age</TableHead>
+                  <TableHead>Weight</TableHead>
+                  <TableHead>Camp</TableHead>
+                  <TableHead>Health</TableHead>
+                  <TableHead className="w-20">Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {goats.map((goat: {
+                  id: number;
+                  tagNumber: string;
+                  name?: string | null;
+                  breedId?: number | null;
+                  gender: string;
+                  dateOfBirth?: Date | string | null;
+                  weightKg?: number | null;
+                  locationCamp?: string | null;
+                  healthStatus: string;
+                  isActive: boolean;
+                }) => {
+                  const breed = breeds?.find(b => b.id === goat.breedId);
+                  const ageMonths = goat.dateOfBirth
+                    ? Math.floor((Date.now() - new Date(goat.dateOfBirth).getTime()) / (1000 * 60 * 60 * 24 * 30))
+                    : null;
+                  const ageLabel = ageMonths !== null
+                    ? ageMonths < 12 ? `${ageMonths}mo` : `${Math.floor(ageMonths / 12)}y ${ageMonths % 12}mo`
+                    : "—";
+                  return (
+                    <TableRow
+                      key={goat.id}
+                      className="cursor-pointer hover:bg-muted/40 transition-colors"
+                      onClick={() => setLocation(`/goats/${goat.id}`)}
+                    >
+                      <TableCell className="font-mono text-sm font-medium">{goat.tagNumber}</TableCell>
+                      <TableCell className="text-sm">{goat.name ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                      <TableCell className="text-sm">{breed?.name ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">
+                          {goat.gender}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{ageLabel}</TableCell>
+                      <TableCell className="text-sm">{goat.weightKg ? `${goat.weightKg} kg` : "—"}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{goat.locationCamp ?? "—"}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={`text-xs ${HEALTH_BADGE[goat.healthStatus] ?? ""}`}>
+                          {goat.healthStatus.replace("_", " ")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={goat.isActive ? "default" : "secondary"} className="text-xs">
+                          {goat.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground">
+          <span>Page {page + 1} of {totalPages} ({total} total)</span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

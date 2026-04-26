@@ -1,0 +1,191 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { trpc } from "@/lib/trpc";
+import { AlertCircle, Calendar, Heart, Syringe } from "lucide-react";
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { toast } from "sonner";
+
+export default function HealthRecords() {
+  const [, setLocation] = useLocation();
+  const { user } = useAuth();
+  const canWrite = user?.role !== "viewer";
+
+  const { data: upcomingDue, isLoading: loadingDue } = trpc.health.getUpcomingDue.useQuery({ daysAhead: 30 });
+  const utils = trpc.useUtils();
+
+  // Bulk vaccination state
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkForm, setBulkForm] = useState({
+    recordType: "Vaccination" as "Vaccination" | "Treatment" | "Deworming" | "Checkup" | "Surgery",
+    productUsed: "", dosage: "", vetName: "",
+    date: new Date().toISOString().split("T")[0]!,
+    nextDueDate: "", cost: "", notes: "",
+  });
+  const bulkMutation = trpc.health.bulkVaccinate.useMutation({
+    onSuccess: (data) => {
+      toast.success(`Bulk ${bulkForm.recordType.toLowerCase()} applied to ${data.count} goats`);
+      utils.health.getUpcomingDue.invalidate();
+      setBulkOpen(false);
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-serif font-semibold">Health Records</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Track vaccinations, treatments, and upcoming health dues</p>
+        </div>
+        {canWrite && (
+          <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+            <DialogTrigger asChild>
+              <Button className="gap-2">
+                <Syringe className="h-4 w-4" />
+                Bulk Vaccinate Herd
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Bulk Herd Treatment</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">This will apply the record to all active goats in your herd.</p>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Record Type</Label>
+                  <Select value={bulkForm.recordType} onValueChange={v => setBulkForm(f => ({ ...f, recordType: v as typeof f.recordType }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {["Vaccination", "Treatment", "Deworming", "Checkup", "Surgery"].map(t => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Product Used</Label>
+                    <Input value={bulkForm.productUsed} onChange={e => setBulkForm(f => ({ ...f, productUsed: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Dosage</Label>
+                    <Input value={bulkForm.dosage} onChange={e => setBulkForm(f => ({ ...f, dosage: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Date *</Label>
+                    <Input type="date" value={bulkForm.date} onChange={e => setBulkForm(f => ({ ...f, date: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Next Due Date</Label>
+                    <Input type="date" value={bulkForm.nextDueDate} onChange={e => setBulkForm(f => ({ ...f, nextDueDate: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Vet Name</Label>
+                    <Input value={bulkForm.vetName} onChange={e => setBulkForm(f => ({ ...f, vetName: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Cost per goat</Label>
+                    <Input type="number" value={bulkForm.cost} onChange={e => setBulkForm(f => ({ ...f, cost: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Notes</Label>
+                  <Textarea value={bulkForm.notes} onChange={e => setBulkForm(f => ({ ...f, notes: e.target.value }))} rows={2} />
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={() => bulkMutation.mutate({ ...bulkForm, cost: bulkForm.cost ? Number(bulkForm.cost) : undefined, nextDueDate: bulkForm.nextDueDate || undefined })}
+                  disabled={bulkMutation.isPending || !bulkForm.date}
+                >
+                  {bulkMutation.isPending ? "Applying to all goats..." : "Apply to Entire Herd"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+
+      {/* Upcoming health calendar */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-medium flex items-center gap-2">
+            <Calendar className="h-4 w-4 text-amber-500" />
+            Upcoming Health Dues (Next 30 Days)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loadingDue ? (
+            <div className="space-y-2">
+              {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+            </div>
+          ) : (upcomingDue ?? []).length === 0 ? (
+            <div className="flex flex-col items-center py-8 text-center">
+              <Heart className="h-10 w-10 text-emerald-400 mb-3" />
+              <p className="text-sm font-medium text-muted-foreground">No upcoming health dues</p>
+              <p className="text-xs text-muted-foreground mt-1">Your herd is up to date!</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(upcomingDue as {
+                id: number; goatId: number; tagNumber: string; goatName?: string | null;
+                recordType: string; nextDueDate: Date | string | null;
+              }[]).map(due => {
+                const daysUntil = due.nextDueDate
+                  ? Math.ceil((new Date(due.nextDueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+                  : null;
+                const isUrgent = daysUntil !== null && daysUntil <= 7;
+                return (
+                  <div
+                    key={due.id}
+                    className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer hover:bg-muted/40 transition-colors ${isUrgent ? "border-amber-300 bg-amber-50" : "border-border"}`}
+                    onClick={() => setLocation(`/goats/${due.goatId}`)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full ${isUrgent ? "bg-amber-500" : "bg-emerald-500"}`} />
+                      <div>
+                        <p className="text-sm font-medium">{due.tagNumber}{due.goatName ? ` — ${due.goatName}` : ""}</p>
+                        <p className="text-xs text-muted-foreground">{due.recordType}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium">{due.nextDueDate ? new Date(due.nextDueDate).toLocaleDateString() : "—"}</p>
+                      {daysUntil !== null && (
+                        <p className={`text-xs ${isUrgent ? "text-amber-600 font-medium" : "text-muted-foreground"}`}>
+                          {daysUntil === 0 ? "Today" : daysUntil < 0 ? `${Math.abs(daysUntil)}d overdue` : `in ${daysUntil}d`}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Info card */}
+      <Card className="border-blue-200 bg-blue-50">
+        <CardContent className="p-4 flex items-start gap-3">
+          <AlertCircle className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-blue-900">Adding individual health records</p>
+            <p className="text-sm text-blue-700 mt-0.5">
+              To add a health record for a specific goat, navigate to that goat's detail page and use the Health tab.
+              {" "}<button className="underline" onClick={() => setLocation("/goats")}>Browse goats →</button>
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
